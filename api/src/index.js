@@ -13,6 +13,25 @@ const pool = new Pool({
     database: process.env.DB_NAME || 'usuariosdb'
 });
 
+//validación de datos de entrada
+function validarUsuario({ nombre, email }) {
+    if (!nombre || !nombre.trim()) {
+        return 'El nombre es obligatorio';
+    }
+
+    if (!email || !email.trim()) {
+        return 'El email es obligatorio';
+    }
+
+    const formatoEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!formatoEmail.test(email)) {
+        return 'El formato del email no es válido';
+    }
+
+    return null;
+}
+
 //healthcheck para docker
 app.get('/api/health', async (req, res) => {
     try {
@@ -33,10 +52,15 @@ app.get('/api/usuarios', async (req, res) => {
     }
 });
 
-//obtener un usuario por id
+//obtener un usuario
 app.get('/api/usuarios/:id', async (req, res) => {
     try {
         const { rows } = await pool.query('SELECT * FROM usuarios WHERE id = $1', [req.params.id]);
+
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
         res.json(rows[0]);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -45,6 +69,12 @@ app.get('/api/usuarios/:id', async (req, res) => {
 
 //crear usuario
 app.post('/api/usuarios', async (req, res) => {
+    const error = validarUsuario(req.body);
+
+    if (error) {
+        return res.status(400).json({ error });
+    }
+
     const { nombre, email } = req.body;
 
     try {
@@ -53,13 +83,22 @@ app.post('/api/usuarios', async (req, res) => {
             [nombre, email]
         );
         res.status(201).json(rows[0]);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+    } catch (err) {
+        if (err.code === '23505') {
+            return res.status(400).json({ error: 'El email ya está registrado' });
+        }
+        res.status(500).json({ error: err.message });
     }
 });
 
 //actualizar usuario
 app.put('/api/usuarios/:id', async (req, res) => {
+    const error = validarUsuario(req.body);
+
+    if (error) {
+        return res.status(400).json({ error });
+    }
+
     const { nombre, email } = req.body;
 
     try {
@@ -67,9 +106,14 @@ app.put('/api/usuarios/:id', async (req, res) => {
             'UPDATE usuarios SET nombre = $1, email = $2 WHERE id = $3 RETURNING *',
             [nombre, email, req.params.id]
         );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
         res.json(rows[0]);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -77,6 +121,11 @@ app.put('/api/usuarios/:id', async (req, res) => {
 app.delete('/api/usuarios/:id', async (req, res) => {
     try {
         const { rows } = await pool.query('DELETE FROM usuarios WHERE id = $1 RETURNING *', [req.params.id]);
+
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
         res.json({ mensaje: 'Usuario eliminado', usuario: rows[0] });
     } catch (error) {
         res.status(500).json({ error: error.message });
